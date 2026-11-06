@@ -8,6 +8,7 @@ from valutatrade_hub.core.usecases import (
     get_portfolio_summary,
     login_user,
     register_user,
+    sell_currency,
 )
 
 
@@ -155,12 +156,62 @@ def handle_buy(args: list[str], current_user: User | None) -> None:
     print(f"Остаток USD: {result['usd_balance']:.2f}")
 
 
+def handle_sell(args: list[str], current_user: User | None) -> None:
+    """Обрабатывает продажу валюты"""
+    if current_user is None:
+        raise ValueError("Сначала выполните login")
+
+    usage = "Использование: sell --currency <валюта> --amount <сумма>"
+
+    if len(args) != 4:
+        raise ValueError(usage)
+
+    options = {}
+
+    for index in range(0, len(args), 2):
+        key = args[index]
+        value = args[index + 1]
+
+        if key not in ("--currency", "--amount") or key in options:
+            raise ValueError(usage)
+
+        options[key] = value
+
+    if set(options) != {"--currency", "--amount"}:
+        raise ValueError(usage)
+
+    try:
+        amount = float(options["--amount"])
+    except ValueError:
+        raise ValueError("Сумма продажи должна быть числом") from None
+
+    result = sell_currency(
+        current_user,
+        options["--currency"],
+        amount,
+    )
+
+    code = result["currency"]
+
+    if code in ("BTC", "ETH"):
+        amount_text = f"{result['amount']:.8f}"
+        balance_text = f"{result['balance']:.8f}"
+    else:
+        amount_text = f"{result['amount']:.2f}"
+        balance_text = f"{result['balance']:.2f}"
+
+    print(f"Успешно продано: {amount_text} {code}")
+    print(f"Зачислено: {result['received_usd']:.2f} USD")
+    print(f"Остаток {code}: {balance_text}")
+    print(f"Остаток USD: {result['usd_balance']:.2f}")
+
+
 def run_cli() -> None:
     """Запускает консольный интерфейс валютной платформы"""
     current_user: User | None = None
 
     print("Добро пожаловать в ValutaTrade Hub!")
-    print("Доступные команды: register, login, show-portfolio, buy, help, exit")
+    print("Доступные команды: register, login, show-portfolio, buy, sell, help, exit")
 
     while True:
         try:
@@ -186,11 +237,15 @@ def run_cli() -> None:
             elif action == "buy":
                 handle_buy(args, current_user)
 
+            elif action == "sell":
+                handle_sell(args, current_user)
+
             elif action == "help":
                 print("register --username <имя> --password <пароль>")
                 print("login --username <имя> --password <пароль>")
                 print("show-portfolio [--base <валюта>]")
                 print("buy --currency <валюта> --amount <сумма>")
+                print("sell --currency <валюта> --amount <сумма>")
                 print("exit — выход из программы")
 
             elif action == "exit":

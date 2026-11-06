@@ -185,3 +185,55 @@ def buy_currency(user: User, currency_code: str, amount: float) -> dict:
         "balance": target_wallet.balance,
         "usd_balance": usd_wallet.balance,
     }
+
+
+def sell_currency(user: User, currency_code: str, amount: float) -> dict:
+    """Продаёт валюту за USD и сохраняет изменения"""
+    if not isinstance(currency_code, str) or not currency_code.strip():
+        raise ValueError("Укажите код валюты")
+
+    code = currency_code.strip().upper()
+
+    if code not in EXCHANGE_RATES:
+        raise ValueError(f"Неизвестная валюта '{code}'")
+
+    if code == "USD":
+        raise ValueError("Нельзя продать USD за USD")
+
+    if type(amount) not in (int, float) or not math.isfinite(amount) or amount <= 0:
+        raise ValueError("Сумма продажи должна быть положительным числом")
+
+    received_usd = amount * EXCHANGE_RATES[code]
+
+    if not math.isfinite(received_usd):
+        raise ValueError("Сумма продажи слишком велика")
+
+    portfolio = load_portfolio(user)
+    target_wallet = portfolio.get_wallet(code)
+
+    if target_wallet is None:
+        raise ValueError(f"Кошелёк '{code}' не найден")
+
+    if target_wallet.balance < amount:
+        raise ValueError(f"Недостаточно {code} для продажи")
+
+    usd_wallet = portfolio.get_wallet("USD")
+
+    if usd_wallet is None:
+        usd_wallet = portfolio.add_currency("USD")
+
+    if not math.isfinite(usd_wallet.balance + received_usd):
+        raise ValueError("Баланс USD превысит допустимое значение")
+
+    target_wallet.withdraw(amount)
+    usd_wallet.deposit(received_usd)
+
+    save_portfolio(portfolio)
+
+    return {
+        "currency": code,
+        "amount": amount,
+        "received_usd": received_usd,
+        "balance": target_wallet.balance,
+        "usd_balance": usd_wallet.balance,
+    }
