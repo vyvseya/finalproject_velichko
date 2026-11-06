@@ -149,3 +149,77 @@ class Wallet:
     def get_balance_info(self) -> str:
         """Возвращает информацию о текущем балансе"""
         return f"Баланс: {self.balance} {self.currency_code}"
+
+
+class Portfolio:
+    """Управляет валютными кошельками пользователя"""
+
+    def __init__(self, user: User):
+        """Создаёт пустой портфель пользователя"""
+        if not isinstance(user, User):
+            raise TypeError("Пользователь должен быть объектом User")
+
+        self._user = user
+        self._user_id = user.user_id
+        self._wallets: dict[str, Wallet] = {}
+
+    @property
+    def user(self) -> User:
+        """Возвращает владельца портфеля"""
+        return self._user
+
+    @property
+    def wallets(self) -> dict[str, Wallet]:
+        """Возвращает копию словаря кошельков"""
+        return self._wallets.copy()
+
+    def add_currency(self, currency_code: str) -> Wallet:
+        """Добавляет новый валютный кошелёк в портфель"""
+        if not isinstance(currency_code, str) or not currency_code.strip():
+            raise ValueError("Код валюты не может быть пустым")
+
+        code = currency_code.strip().upper()
+
+        if code in self._wallets:
+            raise ValueError(f"Кошелёк {code} уже существует")
+
+        wallet = Wallet(code)
+        self._wallets[code] = wallet
+
+        return wallet
+
+    def get_wallet(self, currency_code: str) -> Wallet | None:
+        """Возвращает кошелёк по коду валюты"""
+        if not isinstance(currency_code, str) or not currency_code.strip():
+            raise ValueError("Код валюты не может быть пустым")
+
+        code = currency_code.strip().upper()
+        return self._wallets.get(code)
+
+    def get_total_value(self, base_currency: str = "USD") -> float:
+        """Рассчитывает общую стоимость портфеля в выбранной валюте"""
+        exchange_rates = {
+            "USD": 1.0,
+            "EUR": 1.0786,
+            "BTC": 59337.21,
+            "RUB": 0.01016,
+            "ETH": 3720.0,
+        }
+
+        if not isinstance(base_currency, str) or not base_currency.strip():
+            raise ValueError("Код базовой валюты не может быть пустым")
+
+        base_code = base_currency.strip().upper()
+
+        if base_code not in exchange_rates:
+            raise ValueError(f"Неизвестная базовая валюта '{base_code}'")
+
+        total_usd = 0.0
+
+        for code, wallet in self._wallets.items():
+            if code not in exchange_rates:
+                raise ValueError(f"Курс валюты '{code}' неизвестен")
+
+            total_usd += wallet.balance * exchange_rates[code]
+
+        return total_usd / exchange_rates[base_code]
