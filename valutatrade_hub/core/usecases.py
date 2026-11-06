@@ -1,5 +1,5 @@
 import math
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from valutatrade_hub.core import utils
 from valutatrade_hub.core.models import EXCHANGE_RATES, Portfolio, User
@@ -236,4 +236,74 @@ def sell_currency(user: User, currency_code: str, amount: float) -> dict:
         "received_usd": received_usd,
         "balance": target_wallet.balance,
         "usd_balance": usd_wallet.balance,
+    }
+
+
+def get_exchange_rate(from_currency: str, to_currency: str) -> dict:
+    """Возвращает валютный курс с кэшированием на пять минут"""
+    if not isinstance(from_currency, str) or not isinstance(to_currency, str):
+        raise TypeError("Коды валют должны быть строками")
+
+    from_code = from_currency.strip().upper()
+    to_code = to_currency.strip().upper()
+
+    for code in (from_code, to_code):
+        if code not in EXCHANGE_RATES:
+            raise ValueError(f"Неизвестная валюта '{code}'")
+
+    pair = f"{from_code}_{to_code}"
+    rates = utils.load_json("rates.json", {})
+    now = datetime.now(UTC)
+
+    cached = rates.get(pair)
+
+    if isinstance(cached, dict):
+        try:
+            updated_at = datetime.fromisoformat(cached["updated_at"])
+            rate = float(cached["rate"])
+
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=UTC)
+
+            age = now - updated_at
+
+            if (
+                timedelta(0) <= age < timedelta(minutes=5)
+                and math.isfinite(rate)
+                and rate > 0
+            ):
+                return {
+                    "from_currency": from_code,
+                    "to_currency": to_code,
+                    "rate": rate,
+                    "inverse_rate": 1 / rate,
+                    "updated_at": cached["updated_at"],
+                    "source": cached.get("source", "stub"),
+                    "cached": True,
+                }
+
+        except (KeyError, ValueError, TypeError):
+            pass
+
+    rate = EXCHANGE_RATES[from_code] / EXCHANGE_RATES[to_code]
+    updated_at = now.isoformat()
+
+    rates[pair] = {
+        "rate": rate,
+        "updated_at": updated_at,
+        "source": "stub",
+    }
+    rates["source"] = "stub"
+    rates["last_refresh"] = updated_at
+
+    utils.save_json("rates.json", rates)
+
+    return {
+        "from_currency": from_code,
+        "to_currency": to_code,
+        "rate": rate,
+        "inverse_rate": 1 / rate,
+        "updated_at": updated_at,
+        "source": "stub",
+        "cached": False,
     }

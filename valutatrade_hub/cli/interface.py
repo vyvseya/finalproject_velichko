@@ -5,6 +5,7 @@ from prettytable import PrettyTable
 from valutatrade_hub.core.models import User
 from valutatrade_hub.core.usecases import (
     buy_currency,
+    get_exchange_rate,
     get_portfolio_summary,
     login_user,
     register_user,
@@ -206,12 +207,51 @@ def handle_sell(args: list[str], current_user: User | None) -> None:
     print(f"Остаток USD: {result['usd_balance']:.2f}")
 
 
+def handle_get_rate(args: list[str]) -> None:
+    """Обрабатывает запрос валютного курса"""
+    usage = "Использование: get-rate --from <валюта> --to <валюта>"
+
+    if len(args) != 4:
+        raise ValueError(usage)
+
+    options = {}
+
+    for index in range(0, len(args), 2):
+        key = args[index]
+        value = args[index + 1]
+
+        if key not in ("--from", "--to") or key in options:
+            raise ValueError(usage)
+
+        options[key] = value
+
+    if set(options) != {"--from", "--to"}:
+        raise ValueError(usage)
+
+    result = get_exchange_rate(
+        options["--from"],
+        options["--to"],
+    )
+
+    from_code = result["from_currency"]
+    to_code = result["to_currency"]
+
+    print(f"Курс: 1 {from_code} = {result['rate']:.8f} {to_code}")
+    print(f"Обратный курс: 1 {to_code} = {result['inverse_rate']:.10f} {from_code}")
+    print(f"Обновлено (UTC): {result['updated_at']}")
+    print(f"Источник: {result['source']}")
+    print(f"Из кэша: {'да' if result['cached'] else 'нет'}")
+
+
 def run_cli() -> None:
     """Запускает консольный интерфейс валютной платформы"""
     current_user: User | None = None
 
     print("Добро пожаловать в ValutaTrade Hub!")
-    print("Доступные команды: register, login, show-portfolio, buy, sell, help, exit")
+    print(
+        "Доступные команды: register, login, show-portfolio, "
+        "buy, sell, get-rate, help, exit"
+    )
 
     while True:
         try:
@@ -240,12 +280,16 @@ def run_cli() -> None:
             elif action == "sell":
                 handle_sell(args, current_user)
 
+            elif action == "get-rate":
+                handle_get_rate(args)
+
             elif action == "help":
                 print("register --username <имя> --password <пароль>")
                 print("login --username <имя> --password <пароль>")
                 print("show-portfolio [--base <валюта>]")
                 print("buy --currency <валюта> --amount <сумма>")
                 print("sell --currency <валюта> --amount <сумма>")
+                print("get-rate --from <валюта> --to <валюта>")
                 print("exit — выход из программы")
 
             elif action == "exit":
