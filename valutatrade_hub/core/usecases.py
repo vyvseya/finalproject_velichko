@@ -43,3 +43,29 @@ def register_user(username: str, password: str) -> User:
     utils.save_json("portfolios.json", portfolios)
 
     return user
+
+
+def login_user(username: str, password: str) -> User:
+    """Проверяет учётные данные и возвращает пользователя"""
+    users = utils.load_json("users.json", [])
+
+    user_data = next(
+        (item for item in users if item["username"] == username),
+        None,
+    )
+
+    if user_data is None:
+        raise ValueError(f"Пользователь '{username}' не найден")
+
+    user = User(
+        user_id=user_data["user_id"],
+        username=user_data["username"],
+        hashed_password=user_data["hashed_password"],
+        salt=user_data["salt"],
+        registration_date=datetime.fromisoformat(user_data["registration_date"]),
+    )
+
+    if not user.verify_password(password):
+        raise ValueError("Неверный пароль")
+
+    return user

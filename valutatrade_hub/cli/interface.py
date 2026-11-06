@@ -1,6 +1,7 @@
 import shlex
 
-from valutatrade_hub.core.usecases import register_user
+from valutatrade_hub.core.models import User
+from valutatrade_hub.core.usecases import login_user, register_user
 
 
 def handle_register(args: list[str]) -> None:
@@ -30,10 +31,36 @@ def handle_register(args: list[str]) -> None:
     print("Регистрация завершена успешно")
 
 
+def handle_login(args: list[str]) -> User:
+    """Обрабатывает команду авторизации пользователя"""
+    usage = "Использование: login --username <имя> --password <пароль>"
+
+    if len(args) != 4:
+        raise ValueError(usage)
+
+    options = {}
+
+    for index in range(0, len(args), 2):
+        key = args[index]
+        value = args[index + 1]
+
+        if key not in ("--username", "--password") or key in options:
+            raise ValueError(usage)
+
+        options[key] = value
+
+    return login_user(
+        username=options["--username"],
+        password=options["--password"],
+    )
+
+
 def run_cli() -> None:
     """Запускает консольный интерфейс валютной платформы"""
+    current_user: User | None = None
+
     print("Добро пожаловать в ValutaTrade Hub!")
-    print("Доступные команды: register, help, exit")
+    print("Доступные команды: register, login, help, exit")
 
     while True:
         try:
@@ -49,8 +76,13 @@ def run_cli() -> None:
             if action == "register":
                 handle_register(args)
 
+            elif action == "login":
+                current_user = handle_login(args)
+                print(f"Вы вошли как '{current_user.username}'")
+
             elif action == "help":
                 print("register --username <имя> --password <пароль>")
+                print("login --username <имя> --password <пароль>")
                 print("exit — выход из программы")
 
             elif action == "exit":
