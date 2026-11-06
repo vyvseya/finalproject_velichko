@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from valutatrade_hub.core import utils
-from valutatrade_hub.core.models import User
+from valutatrade_hub.core.models import EXCHANGE_RATES, Portfolio, User
 
 
 def register_user(username: str, password: str) -> User:
@@ -69,3 +69,52 @@ def login_user(username: str, password: str) -> User:
         raise ValueError("Неверный пароль")
 
     return user
+
+
+def load_portfolio(user: User) -> Portfolio:
+    """Загружает портфель пользователя из JSON"""
+    portfolios = utils.load_json("portfolios.json", [])
+
+    portfolio_data = next(
+        (item for item in portfolios if item["user_id"] == user.user_id),
+        None,
+    )
+
+    if portfolio_data is None:
+        raise ValueError("Портфель пользователя не найден")
+
+    portfolio = Portfolio(user)
+
+    for currency_code, wallet_data in portfolio_data["wallets"].items():
+        wallet = portfolio.add_currency(currency_code)
+        wallet.balance = wallet_data["balance"]
+
+    return portfolio
+
+
+def get_portfolio_summary(user: User, base_currency: str = "USD") -> dict:
+    """Формирует информацию о стоимости валютного портфеля"""
+    portfolio = load_portfolio(user)
+
+    total = portfolio.get_total_value(base_currency)
+    base_code = base_currency.strip().upper()
+
+    wallets_info = []
+
+    for code, wallet in portfolio.wallets.items():
+        value = wallet.balance * EXCHANGE_RATES[code] / EXCHANGE_RATES[base_code]
+
+        wallets_info.append(
+            {
+                "currency_code": code,
+                "balance": wallet.balance,
+                "value": value,
+            }
+        )
+
+    return {
+        "username": user.username,
+        "base_currency": base_code,
+        "wallets": wallets_info,
+        "total": total,
+    }

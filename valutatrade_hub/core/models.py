@@ -3,6 +3,14 @@ import math
 import secrets
 from datetime import datetime
 
+EXCHANGE_RATES = {
+    "USD": 1.0,
+    "EUR": 1.0786,
+    "BTC": 59337.21,
+    "RUB": 0.01016,
+    "ETH": 3720.0,
+}
+
 
 class User:
     """Представляет пользователя валютной платформы"""
@@ -198,13 +206,7 @@ class Portfolio:
 
     def get_total_value(self, base_currency: str = "USD") -> float:
         """Рассчитывает общую стоимость портфеля в выбранной валюте"""
-        exchange_rates = {
-            "USD": 1.0,
-            "EUR": 1.0786,
-            "BTC": 59337.21,
-            "RUB": 0.01016,
-            "ETH": 3720.0,
-        }
+        exchange_rates = EXCHANGE_RATES
 
         if not isinstance(base_currency, str) or not base_currency.strip():
             raise ValueError("Код базовой валюты не может быть пустым")
