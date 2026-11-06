@@ -1,4 +1,5 @@
 import hashlib
+import math
 import secrets
 from datetime import datetime
 
@@ -92,3 +93,59 @@ class User:
         ).hexdigest()
 
         return secrets.compare_digest(password_hash, self._hashed_password)
+
+
+class Wallet:
+    """Представляет кошелёк для одной валюты"""
+
+    def __init__(self, currency_code: str, balance: float = 0.0):
+        """Создаёт кошелёк с указанной валютой и балансом"""
+        if not isinstance(currency_code, str) or not currency_code.strip():
+            raise ValueError("Код валюты не может быть пустым")
+
+        self.currency_code = currency_code.strip().upper()
+        self._balance = 0.0
+        self.balance = balance
+
+    @property
+    def balance(self) -> float:
+        """Возвращает текущий баланс кошелька"""
+        return self._balance
+
+    @balance.setter
+    def balance(self, value: float) -> None:
+        """Устанавливает баланс после проверки"""
+        if type(value) not in (int, float) or not math.isfinite(value):
+            raise TypeError("Баланс должен быть конечным числом")
+
+        if value < 0:
+            raise ValueError("Баланс не может быть отрицательным")
+
+        self._balance = float(value)
+
+    def deposit(self, amount: float) -> None:
+        """Пополняет баланс кошелька"""
+        if type(amount) not in (int, float) or not math.isfinite(amount):
+            raise TypeError("Сумма должна быть конечным числом")
+
+        if amount <= 0:
+            raise ValueError("Сумма пополнения должна быть положительной")
+
+        self.balance += amount
+
+    def withdraw(self, amount: float) -> None:
+        """Снимает средства с баланса кошелька"""
+        if type(amount) not in (int, float) or not math.isfinite(amount):
+            raise TypeError("Сумма должна быть конечным числом")
+
+        if amount <= 0:
+            raise ValueError("Сумма снятия должна быть положительной")
+
+        if amount > self.balance:
+            raise ValueError("Недостаточно средств на балансе")
+
+        self.balance -= amount
+
+    def get_balance_info(self) -> str:
+        """Возвращает информацию о текущем балансе"""
+        return f"Баланс: {self.balance} {self.currency_code}"
