@@ -1,3 +1,4 @@
+import math
 from datetime import datetime
 
 from valutatrade_hub.core import utils
@@ -117,4 +118,70 @@ def get_portfolio_summary(user: User, base_currency: str = "USD") -> dict:
         "base_currency": base_code,
         "wallets": wallets_info,
         "total": total,
+    }
+
+
+def save_portfolio(portfolio: Portfolio) -> None:
+    """Сохраняет кошельки пользователя в JSON"""
+    portfolios = utils.load_json("portfolios.json", [])
+
+    for item in portfolios:
+        if item["user_id"] == portfolio.user.user_id:
+            item["wallets"] = {
+                code: {"balance": wallet.balance}
+                for code, wallet in portfolio.wallets.items()
+            }
+
+            utils.save_json("portfolios.json", portfolios)
+            return
+
+    raise ValueError("Портфель пользователя не найден")
+
+
+def buy_currency(user: User, currency_code: str, amount: float) -> dict:
+    """Покупает валюту за USD и сохраняет изменения"""
+    if not isinstance(currency_code, str) or not currency_code.strip():
+        raise ValueError("Укажите код валюты")
+
+    code = currency_code.strip().upper()
+
+    if code not in EXCHANGE_RATES:
+        raise ValueError(f"Неизвестная валюта '{code}'")
+
+    if code == "USD":
+        raise ValueError("Нельзя купить USD за USD")
+
+    if type(amount) not in (int, float) or not math.isfinite(amount) or amount <= 0:
+        raise ValueError("Сумма покупки должна быть положительным числом")
+
+    cost_usd = amount * EXCHANGE_RATES[code]
+
+    if not math.isfinite(cost_usd):
+        raise ValueError("Сумма покупки слишком велика")
+
+    portfolio = load_portfolio(user)
+    usd_wallet = portfolio.get_wallet("USD")
+
+    if usd_wallet is None:
+        raise ValueError("Для покупки необходим USD-кошелёк")
+
+    if usd_wallet.balance < cost_usd:
+        raise ValueError("Недостаточно средств в USD-кошельке")
+
+    target_wallet = portfolio.get_wallet(code)
+
+    if target_wallet is None:
+        target_wallet = portfolio.add_currency(code)
+
+    usd_wallet.withdraw(cost_usd)
+    target_wallet.deposit(amount)
+
+    save_portfolio(portfolio)
+
+    return {
+        "currency": code,
+        "amount": amount,
+        "spent_usd": cost_usd,
+        "balance": target_wallet.balance,
+        "usd_balance": usd_wallet.balance,
     }
