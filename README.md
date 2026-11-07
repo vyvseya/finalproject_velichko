@@ -21,6 +21,46 @@ uv run python main.py
 
 Команда `help` показывает справку, а `exit` завершает работу.
 
+## Структура проекта
+
+Проект разделён на Core Service, Parser Service, инфраструктуру и консольный интерфейс.
+
+```text
+finalproject_velichko/
+├── data/                       # Хранение данных
+│   ├── users.json              # Пользователи
+│   ├── portfolios.json         # Портфели и кошельки
+│   ├── rates.json              # Актуальные курсы
+│   └── exchange_rates.json     # История курсов
+├── valutatrade_hub/
+│   ├── core/                   # Модели и бизнес-логика
+│   │   ├── currencies.py
+│   │   ├── exceptions.py
+│   │   ├── models.py
+│   │   ├── usecases.py
+│   │   └── utils.py
+│   ├── infra/                  # Настройки и база данных
+│   │   ├── database.py
+│   │   └── settings.py
+│   ├── parser_service/         # Получение и обновление курсов
+│   │   ├── config.py
+│   │   ├── api_clients.py
+│   │   ├── storage.py
+│   │   ├── updater.py
+│   │   └── scheduler.py
+│   ├── cli/
+│   │   └── interface.py        # Консольный интерфейс
+│   ├── decorators.py           # Декораторы операций
+│   └── logging_config.py      # Настройка логирования
+├── main.py                     # Точка входа
+├── pyproject.toml              # Конфигурация и зависимости
+├── uv.lock
+├── README.md
+└── .gitignore
+```
+
+Рабочие JSON-файлы в `data/` создаются по мере использования приложения и не хранятся в репозитории.
+
 ## Настройка API
 
 Для получения фиатных курсов необходимо зарегистрироваться на [ExchangeRate-API](https://www.exchangerate-api.com/) и получить API-ключ.
@@ -305,3 +345,10 @@ uv run ruff format .
 - ExchangeRate-API
 
 Проект разработан в учебных целях и предназначен для симуляции валютных операций без использования реальных денежных средств.
+
+
+## Демонстрация работы
+
+На анимации показан полный цикл работы ValutaTrade Hub: регистрация пользователя, авторизация, пополнение виртуального баланса, обновление курсов, покупка и продажа валют, просмотр портфеля и обработка ошибок.
+
+![Демонстрация ValutaTrade Hub](docs/demo.gif)
