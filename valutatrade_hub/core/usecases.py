@@ -149,6 +149,26 @@ def save_portfolio(portfolio: Portfolio) -> None:
     raise ValueError("Портфель пользователя не найден")
 
 
+def deposit_usd(user: User, amount: float) -> dict:
+    """Пополняет виртуальный USD-баланс пользователя"""
+    if type(amount) not in (int, float) or not math.isfinite(amount) or amount <= 0:
+        raise ValueError("Сумма пополнения должна быть положительным числом")
+
+    portfolio = load_portfolio(user)
+    usd_wallet = portfolio.get_wallet("USD")
+
+    if usd_wallet is None:
+        usd_wallet = portfolio.add_currency("USD")
+
+    usd_wallet.deposit(amount)
+    save_portfolio(portfolio)
+
+    return {
+        "amount": amount,
+        "balance": usd_wallet.balance,
+    }
+
+
 @log_action("BUY", verbose=True)
 def buy_currency(user: User, currency_code: str, amount: float) -> dict:
     """Покупает валюту за USD и сохраняет изменения"""

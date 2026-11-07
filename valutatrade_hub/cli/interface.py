@@ -10,6 +10,7 @@ from valutatrade_hub.core.exceptions import (
 from valutatrade_hub.core.models import User
 from valutatrade_hub.core.usecases import (
     buy_currency,
+    deposit_usd,
     get_exchange_rate,
     get_portfolio_summary,
     login_user,
@@ -111,7 +112,7 @@ def handle_show_portfolio(args: list[str], current_user: User | None) -> None:
         balance = wallet["balance"]
         value = wallet["value"]
 
-        if code in ("BTC", "ETH", "SOL"):
+        if code in ("BTC", "ETH"):
             balance_text = f"{balance:.8f}"
         else:
             balance_text = f"{balance:.2f}"
@@ -120,6 +121,27 @@ def handle_show_portfolio(args: list[str], current_user: User | None) -> None:
 
     print(table)
     print(f"ИТОГО: {summary['total']:,.2f} {summary['base_currency']}")
+
+
+def handle_deposit(args: list[str], current_user: User | None) -> None:
+    """Обрабатывает пополнение виртуального USD-баланса"""
+    if current_user is None:
+        raise ValueError("Сначала выполните login")
+
+    usage = "Использование: deposit --amount <сумма>"
+
+    if len(args) != 2 or args[0] != "--amount":
+        raise ValueError(usage)
+
+    try:
+        amount = float(args[1])
+    except ValueError:
+        raise ValueError("Сумма пополнения должна быть числом") from None
+
+    result = deposit_usd(current_user, amount)
+
+    print(f"Успешно зачислено: {result['amount']:.2f} USD")
+    print(f"Баланс USD: {result['balance']:.2f}")
 
 
 def handle_buy(args: list[str], current_user: User | None) -> None:
@@ -159,7 +181,7 @@ def handle_buy(args: list[str], current_user: User | None) -> None:
 
     code = result["currency"]
 
-    if code in ("BTC", "ETH", "SOL"):
+    if code in ("BTC", "ETH"):
         amount_text = f"{result['amount']:.8f}"
     else:
         amount_text = f"{result['amount']:.2f}"
@@ -206,7 +228,7 @@ def handle_sell(args: list[str], current_user: User | None) -> None:
 
     code = result["currency"]
 
-    if code in ("BTC", "ETH", "SOL"):
+    if code in ("BTC", "ETH"):
         amount_text = f"{result['amount']:.8f}"
         balance_text = f"{result['balance']:.8f}"
     else:
@@ -429,7 +451,7 @@ def run_cli() -> None:
     print("Добро пожаловать в ValutaTrade Hub!")
     print(
         "Доступные команды: register, login, show-portfolio, "
-        "buy, sell, get-rate, update-rates, show-rates, help, exit"
+        "deposit, buy, sell, get-rate, update-rates, show-rates, help, exit"
     )
 
     while True:
@@ -453,6 +475,9 @@ def run_cli() -> None:
             elif action == "show-portfolio":
                 handle_show_portfolio(args, current_user)
 
+            elif action == "deposit":
+                handle_deposit(args, current_user)
+
             elif action == "buy":
                 handle_buy(args, current_user)
 
@@ -472,6 +497,7 @@ def run_cli() -> None:
                 print("register --username <имя> --password <пароль>")
                 print("login --username <имя> --password <пароль>")
                 print("show-portfolio [--base <валюта>]")
+                print("deposit --amount <сумма>")
                 print("buy --currency <валюта> --amount <сумма>")
                 print("sell --currency <валюта> --amount <сумма>")
                 print("get-rate --from <валюта> --to <валюта>")
@@ -491,7 +517,7 @@ def run_cli() -> None:
 
         except CurrencyNotFoundError as error:
             print(f"Ошибка: {error}")
-            print("Поддерживаемые валюты: USD, EUR, GBP, RUB, BTC, ETH, SOL")
+            print("Поддерживаемые валюты: USD, EUR, RUB, BTC, ETH")
             print("Для просмотра курса используйте команду get-rate")
 
         except ApiRequestError as error:
