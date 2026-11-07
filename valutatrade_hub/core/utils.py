@@ -10,7 +10,7 @@ DATA_DIR = Path(__file__).resolve().parents[2] / SettingsLoader().get(
 )
 
 
-def load_json(filename: str, default: list | dict) -> list | dict:
+def load_json(filename: str | Path, default: list | dict) -> list | dict:
     """Загружает JSON-файл или возвращает значение по умолчанию"""
     filepath = DATA_DIR / filename
 
@@ -21,10 +21,10 @@ def load_json(filename: str, default: list | dict) -> list | dict:
         return json.load(file)
 
 
-def save_json(filename: str, data: list | dict) -> None:
+def save_json(filename: str | Path, data: list | dict) -> None:
     """Безопасно сохраняет данные в JSON-файл"""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
     filepath = DATA_DIR / filename
+    filepath.parent.mkdir(parents=True, exist_ok=True)
 
     temp_path = None
 
@@ -32,7 +32,7 @@ def save_json(filename: str, data: list | dict) -> None:
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            dir=DATA_DIR,
+            dir=filepath.parent,
             prefix=f".{filepath.name}.",
             suffix=".tmp",
             delete=False,

@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 from valutatrade_hub.core.currencies import get_currency
 from valutatrade_hub.core.exceptions import ApiRequestError, InsufficientFundsError
-from valutatrade_hub.core.models import EXCHANGE_RATES, Portfolio, User
+from valutatrade_hub.core.models import Portfolio, User
 from valutatrade_hub.decorators import log_action
 from valutatrade_hub.infra.database import DatabaseManager
 from valutatrade_hub.infra.settings import SettingsLoader
@@ -100,16 +100,19 @@ def load_portfolio(user: User) -> Portfolio:
 
 
 def get_portfolio_summary(user: User, base_currency: str = "USD") -> dict:
-    """Формирует информацию о стоимости валютного портфеля"""
+    """Формирует информацию о стоимости портфеля по актуальным курсам"""
+    base_code = get_currency(base_currency).code
     portfolio = load_portfolio(user)
 
-    total = portfolio.get_total_value(base_currency)
-    base_code = base_currency.strip().upper()
-
     wallets_info = []
+    total = 0.0
 
     for code, wallet in portfolio.wallets.items():
-        value = wallet.balance * EXCHANGE_RATES[code] / EXCHANGE_RATES[base_code]
+        rate = get_exchange_rate(code, base_code)["rate"]
+        value = wallet.balance * rate
+
+        if not math.isfinite(value) or not math.isfinite(total + value):
+            raise ValueError("Стоимость портфеля слишком велика")
 
         wallets_info.append(
             {
@@ -118,6 +121,8 @@ def get_portfolio_summary(user: User, base_currency: str = "USD") -> dict:
                 "value": value,
             }
         )
+
+        total += value
 
     return {
         "username": user.username,
@@ -155,7 +160,7 @@ def buy_currency(user: User, currency_code: str, amount: float) -> dict:
     if type(amount) not in (int, float) or not math.isfinite(amount) or amount <= 0:
         raise ValueError("Сумма покупки должна быть положительным числом")
 
-    cost_usd = amount * EXCHANGE_RATES[code]
+    cost_usd = amount * get_exchange_rate(code, "USD")["rate"]
 
     if not math.isfinite(cost_usd):
         raise ValueError("Сумма покупки слишком велика")
@@ -199,7 +204,7 @@ def sell_currency(user: User, currency_code: str, amount: float) -> dict:
     if type(amount) not in (int, float) or not math.isfinite(amount) or amount <= 0:
         raise ValueError("Сумма продажи должна быть положительным числом")
 
-    received_usd = amount * EXCHANGE_RATES[code]
+    received_usd = amount * get_exchange_rate(code, "USD")["rate"]
 
     if not math.isfinite(received_usd):
         raise ValueError("Сумма продажи слишком велика")
@@ -236,71 +241,77 @@ def sell_currency(user: User, currency_code: str, amount: float) -> dict:
 
 
 def get_exchange_rate(from_currency: str, to_currency: str) -> dict:
-    """Возвращает валютный курс с кэшированием по настройке TTL"""
+    """Возвращает актуальный курс из локального кэша"""
     from_code = get_currency(from_currency).code
     to_code = get_currency(to_currency).code
-    ttl_seconds = SettingsLoader().get("rates_ttl_seconds", 300)
-
-    pair = f"{from_code}_{to_code}"
-    rates = db.load("rates", {})
     now = datetime.now(UTC)
 
-    cached = rates.get(pair)
+    if from_code == to_code:
+        return {
+            "from_currency": from_code,
+            "to_currency": to_code,
+            "rate": 1.0,
+            "inverse_rate": 1.0,
+            "updated_at": now.isoformat(),
+            "source": "identity",
+            "cached": True,
+        }
 
-    if isinstance(cached, dict):
+    cache = db.load("rates", {"pairs": {}, "last_refresh": None})
+
+    if not isinstance(cache, dict) or not isinstance(cache.get("pairs"), dict):
+        raise ApiRequestError("Несовместимый формат rates.json. Выполните update-rates")
+
+    pairs = cache["pairs"]
+    ttl_seconds = SettingsLoader().get("rates_ttl_seconds", 300)
+
+    def usd_price(code: str) -> tuple[float, datetime, str]:
+        """Возвращает стоимость валюты в USD из кэша"""
+        if code == "USD":
+            return 1.0, now, "USD"
+
+        entry = pairs.get(f"{code}_USD")
+
+        if not isinstance(entry, dict):
+            raise ApiRequestError(f"Курс {code}/USD не найден. Выполните update-rates")
+
         try:
-            updated_at = datetime.fromisoformat(cached["updated_at"])
-            rate = float(cached["rate"])
+            price = entry["rate"]
+            updated_at = datetime.fromisoformat(entry["updated_at"])
+        except (KeyError, ValueError, TypeError) as error:
+            raise ApiRequestError(f"Некорректная запись курса {code}/USD") from error
 
-            if updated_at.tzinfo is None:
-                updated_at = updated_at.replace(tzinfo=UTC)
+        if (
+            type(price) not in (int, float)
+            or not math.isfinite(price)
+            or price <= 0
+            or updated_at.tzinfo is None
+        ):
+            raise ApiRequestError(f"Некорректный курс {code}/USD")
 
-            age = now - updated_at
+        age = now - updated_at
 
-            if (
-                timedelta(0) <= age < timedelta(seconds=ttl_seconds)
-                and math.isfinite(rate)
-                and rate > 0
-            ):
-                return {
-                    "from_currency": from_code,
-                    "to_currency": to_code,
-                    "rate": rate,
-                    "inverse_rate": 1 / rate,
-                    "updated_at": cached["updated_at"],
-                    "source": cached.get("source", "stub"),
-                    "cached": True,
-                }
+        if not timedelta(0) <= age < timedelta(seconds=ttl_seconds):
+            raise ApiRequestError(f"Курс {code}/USD устарел. Выполните update-rates")
 
-        except (KeyError, ValueError, TypeError):
-            pass
+        return float(price), updated_at, entry.get("source", "unknown")
 
-    try:
-        rate = EXCHANGE_RATES[from_code] / EXCHANGE_RATES[to_code]
-    except (KeyError, ZeroDivisionError) as error:
-        raise ApiRequestError(
-            f"Не удалось обновить курс {from_code}/{to_code}: "
-            "нет корректных данных в источнике котировок"
-        ) from error
+    from_usd, from_time, from_source = usd_price(from_code)
+    to_usd, to_time, to_source = usd_price(to_code)
 
-    updated_at = now.isoformat()
+    rate = from_usd / to_usd
 
-    rates[pair] = {
-        "rate": rate,
-        "updated_at": updated_at,
-        "source": "stub",
-    }
-    rates["source"] = "stub"
-    rates["last_refresh"] = updated_at
+    if rate <= 0 or not math.isfinite(rate) or not math.isfinite(1 / rate):
+        raise ApiRequestError("Не удалось рассчитать корректный курс")
 
-    db.save("rates", rates)
+    sources = [source for source in (from_source, to_source) if source != "USD"]
 
     return {
         "from_currency": from_code,
         "to_currency": to_code,
         "rate": rate,
         "inverse_rate": 1 / rate,
-        "updated_at": updated_at,
-        "source": "stub",
-        "cached": False,
+        "updated_at": min(from_time, to_time).isoformat(),
+        "source": ", ".join(dict.fromkeys(sources)),
+        "cached": True,
     }

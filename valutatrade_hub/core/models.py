@@ -3,14 +3,6 @@ import math
 import secrets
 from datetime import datetime
 
-EXCHANGE_RATES = {
-    "USD": 1.0,
-    "EUR": 1.0786,
-    "BTC": 59337.21,
-    "RUB": 0.01016,
-    "ETH": 3720.0,
-}
-
 
 class User:
     """Представляет пользователя валютной платформы"""
@@ -205,23 +197,20 @@ class Portfolio:
         return self._wallets.get(code)
 
     def get_total_value(self, base_currency: str = "USD") -> float:
-        """Рассчитывает общую стоимость портфеля в выбранной валюте"""
-        exchange_rates = EXCHANGE_RATES
+        """Рассчитывает стоимость портфеля по актуальным курсам"""
+        from valutatrade_hub.core.currencies import get_currency
+        from valutatrade_hub.core.usecases import get_exchange_rate
 
-        if not isinstance(base_currency, str) or not base_currency.strip():
-            raise ValueError("Код базовой валюты не может быть пустым")
-
-        base_code = base_currency.strip().upper()
-
-        if base_code not in exchange_rates:
-            raise ValueError(f"Неизвестная базовая валюта '{base_code}'")
-
-        total_usd = 0.0
+        base_code = get_currency(base_currency).code
+        total = 0.0
 
         for code, wallet in self._wallets.items():
-            if code not in exchange_rates:
-                raise ValueError(f"Курс валюты '{code}' неизвестен")
+            rate = get_exchange_rate(code, base_code)["rate"]
+            value = wallet.balance * rate
 
-            total_usd += wallet.balance * exchange_rates[code]
+            if not math.isfinite(value) or not math.isfinite(total + value):
+                raise ValueError("Стоимость портфеля слишком велика")
 
-        return total_usd / exchange_rates[base_code]
+            total += value
+
+        return total

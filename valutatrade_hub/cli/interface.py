@@ -16,6 +16,13 @@ from valutatrade_hub.core.usecases import (
     register_user,
     sell_currency,
 )
+from valutatrade_hub.parser_service.api_clients import (
+    CoinGeckoClient,
+    ExchangeRateApiClient,
+)
+from valutatrade_hub.parser_service.config import ParserConfig
+from valutatrade_hub.parser_service.storage import RatesStorage
+from valutatrade_hub.parser_service.updater import RatesUpdater
 
 
 def handle_register(args: list[str]) -> None:
@@ -104,7 +111,7 @@ def handle_show_portfolio(args: list[str], current_user: User | None) -> None:
         balance = wallet["balance"]
         value = wallet["value"]
 
-        if code in ("BTC", "ETH"):
+        if code in ("BTC", "ETH", "SOL"):
             balance_text = f"{balance:.8f}"
         else:
             balance_text = f"{balance:.2f}"
@@ -152,7 +159,7 @@ def handle_buy(args: list[str], current_user: User | None) -> None:
 
     code = result["currency"]
 
-    if code in ("BTC", "ETH"):
+    if code in ("BTC", "ETH", "SOL"):
         amount_text = f"{result['amount']:.8f}"
     else:
         amount_text = f"{result['amount']:.2f}"
@@ -199,7 +206,7 @@ def handle_sell(args: list[str], current_user: User | None) -> None:
 
     code = result["currency"]
 
-    if code in ("BTC", "ETH"):
+    if code in ("BTC", "ETH", "SOL"):
         amount_text = f"{result['amount']:.8f}"
         balance_text = f"{result['balance']:.8f}"
     else:
@@ -248,6 +255,173 @@ def handle_get_rate(args: list[str]) -> None:
     print(f"Из кэша: {'да' if result['cached'] else 'нет'}")
 
 
+def handle_update_rates(args: list[str]) -> None:
+    """Обрабатывает команду обновления валютных курсов"""
+    usage = "Использование: update-rates [--source coingecko|exchangerate]"
+
+    if not args:
+        source = None
+    elif (
+        len(args) == 2
+        and args[0] == "--source"
+        and args[1] in ("coingecko", "exchangerate")
+    ):
+        source = args[1]
+    else:
+        raise ValueError(usage)
+
+    config = ParserConfig()
+
+    updater = RatesUpdater(
+        CoinGeckoClient(config),
+        ExchangeRateApiClient(config),
+        RatesStorage(config),
+    )
+
+    print("Запускаем обновление валютных курсов...")
+
+    result = updater.run_update(source=source)
+
+    print(f"Обновлено курсов: {result['updated']}")
+    print(f"Последнее обновление (UTC): {result['last_refresh']}")
+
+    if result["errors"]:
+        print("Часть источников завершилась с ошибкой:")
+
+        for error in result["errors"]:
+            print(f"- {error}")
+    else:
+        print("Обновление завершено успешно")
+
+
+def handle_show_rates(args: list[str]) -> None:
+    """Показывает сохранённые курсы с фильтрами"""
+    usage = (
+        "Использование: show-rates [--currency <код>] [--top <число>] [--base <код>]"
+    )
+
+    if len(args) % 2 != 0:
+        raise ValueError(usage)
+
+    options = {}
+
+    for index in range(0, len(args), 2):
+        key = args[index]
+        value = args[index + 1]
+
+        if key not in ("--currency", "--top", "--base") or key in options:
+            raise ValueError(usage)
+
+        if not value.strip():
+            raise ValueError(usage)
+
+        options[key] = value
+
+    top = None
+
+    if "--top" in options:
+        try:
+            top = int(options["--top"])
+        except ValueError:
+            raise ValueError(
+                "Параметр --top должен быть положительным целым числом"
+            ) from None
+
+        if top <= 0:
+            raise ValueError("Параметр --top должен быть положительным целым числом")
+
+    config = ParserConfig()
+    base_code = options.get("--base", config.BASE_CURRENCY).upper()
+    currency_code = options.get("--currency", "").upper()
+
+    cache = RatesStorage(config).load_current()
+
+    if not isinstance(cache, dict) or not isinstance(cache.get("pairs"), dict):
+        raise TypeError("Некорректный формат rates.json. Выполните update-rates")
+
+    pairs = cache["pairs"]
+
+    if not pairs:
+        print(
+            "Локальный кеш курсов пуст. Выполните 'update-rates', чтобы загрузить данные."
+        )
+        return
+
+    if base_code == "USD":
+        base_rate = 1.0
+    else:
+        base_entry = pairs.get(f"{base_code}_USD")
+
+        if not isinstance(base_entry, dict):
+            print(f"Курс для '{base_code}' не найден в кеше.")
+            return
+
+        base_rate = base_entry.get("rate")
+
+        if type(base_rate) not in (int, float) or base_rate <= 0:
+            raise ValueError(f"Некорректный курс {base_code}/USD")
+
+    rows = []
+
+    for pair, info in pairs.items():
+        if not pair.endswith("_USD") or not isinstance(info, dict):
+            continue
+
+        code = pair.removesuffix("_USD")
+
+        if currency_code and code != currency_code:
+            continue
+
+        if top is not None and code not in config.CRYPTO_CURRENCIES:
+            continue
+
+        rate = info.get("rate")
+
+        if type(rate) not in (int, float) or rate <= 0:
+            continue
+
+        rows.append(
+            (
+                code,
+                rate / base_rate,
+                info.get("updated_at", "-"),
+                info.get("source", "-"),
+            )
+        )
+
+    if not rows:
+        if currency_code:
+            print(f"Курс для '{currency_code}' не найден в кеше.")
+        else:
+            print("Нет курсов по заданным фильтрам")
+        return
+
+    if top is not None:
+        rows.sort(key=lambda item: item[1], reverse=True)
+        rows = rows[:top]
+    else:
+        rows.sort(key=lambda item: item[0])
+
+    table = PrettyTable()
+    table.field_names = ["Пара", "Курс", "Обновлено (UTC)", "Источник"]
+
+    for code, rate, updated_at, source in rows:
+        table.add_row(
+            [
+                f"{code}_{base_code}",
+                f"{rate:,.8f}",
+                updated_at,
+                source,
+            ]
+        )
+
+    print(
+        f"Курсы из локального кэша "
+        f"(обновлено: {cache.get('last_refresh') or 'неизвестно'}):"
+    )
+    print(table)
+
+
 def run_cli() -> None:
     """Запускает консольный интерфейс валютной платформы"""
     current_user: User | None = None
@@ -255,7 +429,7 @@ def run_cli() -> None:
     print("Добро пожаловать в ValutaTrade Hub!")
     print(
         "Доступные команды: register, login, show-portfolio, "
-        "buy, sell, get-rate, help, exit"
+        "buy, sell, get-rate, update-rates, show-rates, help, exit"
     )
 
     while True:
@@ -288,6 +462,12 @@ def run_cli() -> None:
             elif action == "get-rate":
                 handle_get_rate(args)
 
+            elif action == "update-rates":
+                handle_update_rates(args)
+
+            elif action == "show-rates":
+                handle_show_rates(args)
+
             elif action == "help":
                 print("register --username <имя> --password <пароль>")
                 print("login --username <имя> --password <пароль>")
@@ -295,6 +475,8 @@ def run_cli() -> None:
                 print("buy --currency <валюта> --amount <сумма>")
                 print("sell --currency <валюта> --amount <сумма>")
                 print("get-rate --from <валюта> --to <валюта>")
+                print("update-rates [--source coingecko|exchangerate]")
+                print("show-rates [--currency <код>] [--top <число>] [--base <код>]")
                 print("exit — выход из программы")
 
             elif action == "exit":
@@ -309,7 +491,7 @@ def run_cli() -> None:
 
         except CurrencyNotFoundError as error:
             print(f"Ошибка: {error}")
-            print("Поддерживаемые валюты: USD, EUR, RUB, BTC, ETH")
+            print("Поддерживаемые валюты: USD, EUR, GBP, RUB, BTC, ETH, SOL")
             print("Для просмотра курса используйте команду get-rate")
 
         except ApiRequestError as error:
