@@ -1,7 +1,13 @@
 import json
+import os
+import tempfile
 from pathlib import Path
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+from valutatrade_hub.infra.settings import SettingsLoader
+
+DATA_DIR = Path(__file__).resolve().parents[2] / SettingsLoader().get(
+    "data_dir", "data"
+)
 
 
 def load_json(filename: str, default: list | dict) -> list | dict:
@@ -16,9 +22,29 @@ def load_json(filename: str, default: list | dict) -> list | dict:
 
 
 def save_json(filename: str, data: list | dict) -> None:
-    """Сохраняет данные в JSON-файл"""
+    """Безопасно сохраняет данные в JSON-файл"""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     filepath = DATA_DIR / filename
 
-    with filepath.open("w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=4)
+    temp_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=DATA_DIR,
+            prefix=f".{filepath.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+
+            json.dump(data, temp_file, ensure_ascii=False, indent=4)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+
+        os.replace(temp_path, filepath)
+
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)

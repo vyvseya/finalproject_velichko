@@ -2,6 +2,11 @@ import shlex
 
 from prettytable import PrettyTable
 
+from valutatrade_hub.core.exceptions import (
+    ApiRequestError,
+    CurrencyNotFoundError,
+    InsufficientFundsError,
+)
 from valutatrade_hub.core.models import User
 from valutatrade_hub.core.usecases import (
     buy_currency,
@@ -299,7 +304,19 @@ def run_cli() -> None:
             else:
                 print(f"Неизвестная команда: {action}")
 
-        except ValueError as error:
+        except InsufficientFundsError as error:
+            print(f"Ошибка: {error}")
+
+        except CurrencyNotFoundError as error:
+            print(f"Ошибка: {error}")
+            print("Поддерживаемые валюты: USD, EUR, RUB, BTC, ETH")
+            print("Для просмотра курса используйте команду get-rate")
+
+        except ApiRequestError as error:
+            print(f"Ошибка: {error}")
+            print("Повторите попытку позже или проверьте подключение к сети")
+
+        except (ValueError, TypeError) as error:
             print(f"Ошибка: {error}")
 
         except (EOFError, KeyboardInterrupt):

@@ -1,14 +1,20 @@
 import math
 from datetime import UTC, datetime, timedelta
 
-from valutatrade_hub.core import utils
+from valutatrade_hub.core.currencies import get_currency
+from valutatrade_hub.core.exceptions import ApiRequestError, InsufficientFundsError
 from valutatrade_hub.core.models import EXCHANGE_RATES, Portfolio, User
+from valutatrade_hub.decorators import log_action
+from valutatrade_hub.infra.database import DatabaseManager
+from valutatrade_hub.infra.settings import SettingsLoader
+
+db = DatabaseManager()
 
 
 def register_user(username: str, password: str) -> User:
     """Регистрирует нового пользователя и создаёт пустой портфель"""
-    users = utils.load_json("users.json", [])
-    portfolios = utils.load_json("portfolios.json", [])
+    users = db.load("users", [])
+    portfolios = db.load("portfolios", [])
 
     user = User(
         user_id=max((item["user_id"] for item in users), default=0) + 1,
@@ -40,15 +46,15 @@ def register_user(username: str, password: str) -> User:
         }
     )
 
-    utils.save_json("users.json", users)
-    utils.save_json("portfolios.json", portfolios)
+    db.save("users", users)
+    db.save("portfolios", portfolios)
 
     return user
 
 
 def login_user(username: str, password: str) -> User:
     """Проверяет учётные данные и возвращает пользователя"""
-    users = utils.load_json("users.json", [])
+    users = db.load("users", [])
 
     user_data = next(
         (item for item in users if item["username"] == username),
@@ -74,7 +80,7 @@ def login_user(username: str, password: str) -> User:
 
 def load_portfolio(user: User) -> Portfolio:
     """Загружает портфель пользователя из JSON"""
-    portfolios = utils.load_json("portfolios.json", [])
+    portfolios = db.load("portfolios", [])
 
     portfolio_data = next(
         (item for item in portfolios if item["user_id"] == user.user_id),
@@ -123,7 +129,7 @@ def get_portfolio_summary(user: User, base_currency: str = "USD") -> dict:
 
 def save_portfolio(portfolio: Portfolio) -> None:
     """Сохраняет кошельки пользователя в JSON"""
-    portfolios = utils.load_json("portfolios.json", [])
+    portfolios = db.load("portfolios", [])
 
     for item in portfolios:
         if item["user_id"] == portfolio.user.user_id:
@@ -132,21 +138,16 @@ def save_portfolio(portfolio: Portfolio) -> None:
                 for code, wallet in portfolio.wallets.items()
             }
 
-            utils.save_json("portfolios.json", portfolios)
+            db.save("portfolios", portfolios)
             return
 
     raise ValueError("Портфель пользователя не найден")
 
 
+@log_action("BUY", verbose=True)
 def buy_currency(user: User, currency_code: str, amount: float) -> dict:
     """Покупает валюту за USD и сохраняет изменения"""
-    if not isinstance(currency_code, str) or not currency_code.strip():
-        raise ValueError("Укажите код валюты")
-
-    code = currency_code.strip().upper()
-
-    if code not in EXCHANGE_RATES:
-        raise ValueError(f"Неизвестная валюта '{code}'")
+    code = get_currency(currency_code).code
 
     if code == "USD":
         raise ValueError("Нельзя купить USD за USD")
@@ -163,10 +164,10 @@ def buy_currency(user: User, currency_code: str, amount: float) -> dict:
     usd_wallet = portfolio.get_wallet("USD")
 
     if usd_wallet is None:
-        raise ValueError("Для покупки необходим USD-кошелёк")
+        raise InsufficientFundsError(0.0, cost_usd, "USD")
 
     if usd_wallet.balance < cost_usd:
-        raise ValueError("Недостаточно средств в USD-кошельке")
+        raise InsufficientFundsError(usd_wallet.balance, cost_usd, "USD")
 
     target_wallet = portfolio.get_wallet(code)
 
@@ -187,15 +188,10 @@ def buy_currency(user: User, currency_code: str, amount: float) -> dict:
     }
 
 
+@log_action("SELL")
 def sell_currency(user: User, currency_code: str, amount: float) -> dict:
     """Продаёт валюту за USD и сохраняет изменения"""
-    if not isinstance(currency_code, str) or not currency_code.strip():
-        raise ValueError("Укажите код валюты")
-
-    code = currency_code.strip().upper()
-
-    if code not in EXCHANGE_RATES:
-        raise ValueError(f"Неизвестная валюта '{code}'")
+    code = get_currency(currency_code).code
 
     if code == "USD":
         raise ValueError("Нельзя продать USD за USD")
@@ -212,10 +208,10 @@ def sell_currency(user: User, currency_code: str, amount: float) -> dict:
     target_wallet = portfolio.get_wallet(code)
 
     if target_wallet is None:
-        raise ValueError(f"Кошелёк '{code}' не найден")
+        raise InsufficientFundsError(0.0, amount, code)
 
     if target_wallet.balance < amount:
-        raise ValueError(f"Недостаточно {code} для продажи")
+        raise InsufficientFundsError(target_wallet.balance, amount, code)
 
     usd_wallet = portfolio.get_wallet("USD")
 
@@ -240,19 +236,13 @@ def sell_currency(user: User, currency_code: str, amount: float) -> dict:
 
 
 def get_exchange_rate(from_currency: str, to_currency: str) -> dict:
-    """Возвращает валютный курс с кэшированием на пять минут"""
-    if not isinstance(from_currency, str) or not isinstance(to_currency, str):
-        raise TypeError("Коды валют должны быть строками")
-
-    from_code = from_currency.strip().upper()
-    to_code = to_currency.strip().upper()
-
-    for code in (from_code, to_code):
-        if code not in EXCHANGE_RATES:
-            raise ValueError(f"Неизвестная валюта '{code}'")
+    """Возвращает валютный курс с кэшированием по настройке TTL"""
+    from_code = get_currency(from_currency).code
+    to_code = get_currency(to_currency).code
+    ttl_seconds = SettingsLoader().get("rates_ttl_seconds", 300)
 
     pair = f"{from_code}_{to_code}"
-    rates = utils.load_json("rates.json", {})
+    rates = db.load("rates", {})
     now = datetime.now(UTC)
 
     cached = rates.get(pair)
@@ -268,7 +258,7 @@ def get_exchange_rate(from_currency: str, to_currency: str) -> dict:
             age = now - updated_at
 
             if (
-                timedelta(0) <= age < timedelta(minutes=5)
+                timedelta(0) <= age < timedelta(seconds=ttl_seconds)
                 and math.isfinite(rate)
                 and rate > 0
             ):
@@ -285,7 +275,14 @@ def get_exchange_rate(from_currency: str, to_currency: str) -> dict:
         except (KeyError, ValueError, TypeError):
             pass
 
-    rate = EXCHANGE_RATES[from_code] / EXCHANGE_RATES[to_code]
+    try:
+        rate = EXCHANGE_RATES[from_code] / EXCHANGE_RATES[to_code]
+    except (KeyError, ZeroDivisionError) as error:
+        raise ApiRequestError(
+            f"Не удалось обновить курс {from_code}/{to_code}: "
+            "нет корректных данных в источнике котировок"
+        ) from error
+
     updated_at = now.isoformat()
 
     rates[pair] = {
@@ -296,7 +293,7 @@ def get_exchange_rate(from_currency: str, to_currency: str) -> dict:
     rates["source"] = "stub"
     rates["last_refresh"] = updated_at
 
-    utils.save_json("rates.json", rates)
+    db.save("rates", rates)
 
     return {
         "from_currency": from_code,
