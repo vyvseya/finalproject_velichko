@@ -112,7 +112,7 @@ def handle_show_portfolio(args: list[str], current_user: User | None) -> None:
         balance = wallet["balance"]
         value = wallet["value"]
 
-        if code in ("BTC", "ETH"):
+        if code in ("BTC", "ETH", "SOL"):
             balance_text = f"{balance:.8f}"
         else:
             balance_text = f"{balance:.2f}"
@@ -181,7 +181,7 @@ def handle_buy(args: list[str], current_user: User | None) -> None:
 
     code = result["currency"]
 
-    if code in ("BTC", "ETH"):
+    if code in ("BTC", "ETH", "SOL"):
         amount_text = f"{result['amount']:.8f}"
     else:
         amount_text = f"{result['amount']:.2f}"
@@ -228,7 +228,7 @@ def handle_sell(args: list[str], current_user: User | None) -> None:
 
     code = result["currency"]
 
-    if code in ("BTC", "ETH"):
+    if code in ("BTC", "ETH", "SOL"):
         amount_text = f"{result['amount']:.8f}"
         balance_text = f"{result['balance']:.8f}"
     else:
@@ -517,7 +517,7 @@ def run_cli() -> None:
 
         except CurrencyNotFoundError as error:
             print(f"Ошибка: {error}")
-            print("Поддерживаемые валюты: USD, EUR, RUB, BTC, ETH")
+            print("Поддерживаемые валюты: USD, EUR, GBP, RUB, BTC, ETH, SOL")
             print("Для просмотра курса используйте команду get-rate")
 
         except ApiRequestError as error:
